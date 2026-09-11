@@ -1068,6 +1068,40 @@ mod shuttle_tests {
     use crate::telemetry::{Dial9HandleTokioExt, TokioAttachOptions};
     use dial9_core::shuttle_test;
 
+    /// Captures each sealed segment's payload as the pipeline processes
+    /// it, so assertions run against real pipeline-processed output rather
+    /// than pre-pipeline bytes.
+    struct CapturingProcessor {
+        segments: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
+    }
+
+    impl dial9_core::pipeline::SegmentProcessor for CapturingProcessor {
+        fn name(&self) -> &'static str {
+            "Capture"
+        }
+
+        fn process(
+            &mut self,
+            data: dial9_core::pipeline::SegmentData,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<
+                            dial9_core::pipeline::SegmentData,
+                            dial9_core::pipeline::ProcessError,
+                        >,
+                    > + Send
+                    + '_,
+            >,
+        > {
+            self.segments
+                .lock()
+                .unwrap()
+                .push(data.payload().clone().into_vec());
+            Box::pin(async move { Ok(data) })
+        }
+    }
+
     shuttle_test! {
         num_iters = 10_000, depth = 3;
         // Races concurrent attaches on one cloned `Dial9Handle`, matching
@@ -1147,9 +1181,26 @@ mod shuttle_tests {
 
             drop(recorder); // Finalizes: seals the pending segment.
 
+            // A pipeline stage attached directly to this recorder would make
+            // `build()` spawn a worker thread that blocks on a real Tokio
+            // runtime, deadlocking shuttle's one real OS thread. Instead,
+            // drive the sealed bytes through a `WorkerLoop` via
+            // shuttle's own cooperative `block_on`, so the assertion below
+            // runs against real pipeline-processed output.
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let capture = CapturingProcessor {
+                segments: captured.clone(),
+            };
+            shuttle::future::block_on(dial9_core::test_util::run_pipeline_continuous(
+                sealed.take(),
+                vec![Box::new(capture)],
+                Duration::from_millis(5),
+            ))
+            .expect("pipeline run");
+
             let mut seen = std::collections::HashMap::new();
-            for bytes in sealed.take() {
-                let events = crate::telemetry::format::decode_events(&bytes).expect("decode trace");
+            for bytes in captured.lock().unwrap().iter() {
+                let events = crate::telemetry::format::decode_events(bytes).expect("decode trace");
                 for event in events {
                     if let crate::telemetry::analysis_events::Dial9Event::SegmentMetadataEvent(meta) =
                         event
