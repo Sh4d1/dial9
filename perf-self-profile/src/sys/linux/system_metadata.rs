@@ -42,7 +42,7 @@ fn collect_system_metadata() -> Vec<(String, String)> {
     out
 }
 
-fn uname_metadata() -> io::Result<[(String, String); 4]> {
+fn uname_metadata() -> io::Result<Vec<(String, String)>> {
     let mut utsname = MaybeUninit::<libc::utsname>::uninit();
     // SAFETY: `utsname.as_mut_ptr()` points to valid storage for uname
     // to initialize.
@@ -53,28 +53,37 @@ fn uname_metadata() -> io::Result<[(String, String); 4]> {
     // SAFETY: uname returned success and initialized `utsname`.
     let utsname = unsafe { utsname.assume_init() };
 
-    Ok([
-        (
-            "cpu.profile.machine_hostname".to_string(),
-            uname_field(&utsname.nodename)?,
-        ),
+    let utsname_fields = vec![
+        ("cpu.profile.machine_hostname".to_string(), utsname.nodename),
         (
             "cpu.profile.machine_architecture".to_string(),
-            uname_field(&utsname.machine)?,
+            utsname.machine,
         ),
-        (
-            "cpu.profile.kernel_release".to_string(),
-            uname_field(&utsname.release)?,
-        ),
-        (
-            "cpu.profile.kernel_version".to_string(),
-            uname_field(&utsname.version)?,
-        ),
-    ])
+        ("cpu.profile.kernel_release".to_string(), utsname.release),
+        ("cpu.profile.kernel_version".to_string(), utsname.version),
+    ];
+
+    let mut out = Vec::new();
+
+    for (field_name, field_value) in utsname_fields {
+        match uname_field(&field_value) {
+            Ok(value) => out.push((field_name, value)),
+            Err(err) => tracing::warn!("failed to read {field_name} from libc::uname: {err}"),
+        }
+    }
+
+    Ok(out)
 }
 
 fn uname_field(field: &[libc::c_char]) -> io::Result<String> {
-    // SAFETY: fields populated by uname are null-terminated C strings.
+    if !field.contains(&0) {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "field is not NUL-terminated",
+        ));
+    }
+    // SAFETY: The check above guarantees a NUL occurs within `field`, so
+    // `from_ptr` stops before reading beyond the slice.
     let value = unsafe { CStr::from_ptr(field.as_ptr()) };
 
     value
@@ -158,6 +167,14 @@ model name  : Neoverse-N1
                 .unwrap_or_else(|| panic!("missing {key}"));
             assert!(!value.is_empty(), "{key} must not be empty");
         }
+    }
+
+    #[test]
+    fn uname_field_rejects_missing_nul_terminator() {
+        let field = [b'x' as libc::c_char; 4];
+        let error = uname_field(&field).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
     }
 
     #[test]
