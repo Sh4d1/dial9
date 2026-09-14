@@ -42,7 +42,10 @@ impl SegmentProcessor for CapturingProcessor {
     }
 }
 
-/// Decode every event across the captured per-segment payloads.
+/// Decode every event across the captured per-segment payloads. Only used
+/// by non-shuttle tests today: shuttle tests only need `CapturingProcessor`
+/// itself.
+#[cfg(not(shuttle))]
 pub(crate) fn decode_captured(
     segments: &[Vec<u8>],
 ) -> Vec<crate::telemetry::analysis_events::Dial9Event> {

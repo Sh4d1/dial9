@@ -1065,42 +1065,9 @@ mod tests {
 mod shuttle_tests {
     use super::super::recorder_tokio;
     use super::*;
+    use crate::background_task::testutil::CapturingProcessor;
     use crate::telemetry::{Dial9HandleTokioExt, TokioAttachOptions};
     use dial9_core::shuttle_test;
-
-    /// Captures each sealed segment's payload as the pipeline processes
-    /// it, so assertions run against real pipeline-processed output rather
-    /// than pre-pipeline bytes.
-    struct CapturingProcessor {
-        segments: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
-    }
-
-    impl dial9_core::pipeline::SegmentProcessor for CapturingProcessor {
-        fn name(&self) -> &'static str {
-            "Capture"
-        }
-
-        fn process(
-            &mut self,
-            data: dial9_core::pipeline::SegmentData,
-        ) -> std::pin::Pin<
-            Box<
-                dyn std::future::Future<
-                        Output = Result<
-                            dial9_core::pipeline::SegmentData,
-                            dial9_core::pipeline::ProcessError,
-                        >,
-                    > + Send
-                    + '_,
-            >,
-        > {
-            self.segments
-                .lock()
-                .unwrap()
-                .push(data.payload().clone().into_vec());
-            Box::pin(async move { Ok(data) })
-        }
-    }
 
     shuttle_test! {
         // Attaching a pipeline stage makes `build()` spawn the
@@ -1130,10 +1097,7 @@ mod shuttle_tests {
 
             const ATTACHERS: usize = 3;
             let writer = dial9_core::buffer::MemoryBuffer::new(1 << 16).unwrap();
-            let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let capture = CapturingProcessor {
-                segments: captured.clone(),
-            };
+            let (capture, captured) = CapturingProcessor::new();
             let recorder = dial9_core::recorder::recorder(writer)
                 .pipe(capture)
                 .build();
