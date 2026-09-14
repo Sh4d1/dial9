@@ -53,22 +53,19 @@ fn uname_metadata() -> io::Result<Vec<(String, String)>> {
     // SAFETY: uname returned success and initialized `utsname`.
     let utsname = unsafe { utsname.assume_init() };
 
-    let utsname_fields = vec![
-        ("cpu.profile.machine_hostname".to_string(), utsname.nodename),
-        (
-            "cpu.profile.machine_architecture".to_string(),
-            utsname.machine,
-        ),
-        ("cpu.profile.kernel_release".to_string(), utsname.release),
-        ("cpu.profile.kernel_version".to_string(), utsname.version),
+    let fields = [
+        ("cpu.profile.machine_hostname", &utsname.nodename),
+        ("cpu.profile.machine_architecture", &utsname.machine),
+        ("cpu.profile.kernel_release", &utsname.release),
+        ("cpu.profile.kernel_version", &utsname.version),
     ];
 
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(fields.len());
 
-    for (field_name, field_value) in utsname_fields {
-        match uname_field(&field_value) {
-            Ok(value) => out.push((field_name, value)),
-            Err(err) => tracing::warn!("failed to read {field_name} from libc::uname: {err}"),
+    for (metadata_key, uname_value) in fields {
+        match uname_field(uname_value) {
+            Ok(value) => out.push((metadata_key.to_owned(), value)),
+            Err(err) => tracing::warn!("failed to read {metadata_key} from libc::uname: {err}"),
         }
     }
 
