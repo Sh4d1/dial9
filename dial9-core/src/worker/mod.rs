@@ -104,7 +104,7 @@ pub(crate) fn run_background_task(
     shutdown: tokio::sync::oneshot::Receiver<Duration>,
     fs: Arc<Fs>,
 ) {
-    let rt = tokio::runtime::Builder::new_current_thread()
+    let rt = crate::primitives::runtime::Builder::new_current_thread()
         .thread_name("dial9-worker-rt")
         .enable_all()
         .build()
@@ -116,9 +116,8 @@ pub(crate) fn run_background_task(
 /// Builds the `WorkerLoop`, contains any panic escaping its initialization
 /// or run loop, and races the shutdown signal / drain timeout against it.
 /// Doesn't build its own Tokio runtime: [`run_background_task`] does that
-/// via `rt.block_on`. The panic-containment/shutdown-race portion is
-/// shuttle-drivable (`shuttle_tests`); the drain-timeout race isn't, since
-/// `tokio::time::timeout` needs a real reactor.
+/// via `rt.block_on`. Fully shuttle-drivable (`shuttle_tests`), including
+/// the drain-timeout race, via `primitives::time::timeout`.
 async fn run_background_task_inner(
     mut config: BackgroundTaskConfig,
     shutdown: tokio::sync::oneshot::Receiver<Duration>,
@@ -167,7 +166,7 @@ async fn run_background_task_inner(
     // Tell the worker to exit after its current processing cycle.
     stop.cancel();
     // Give it `drain_timeout` to finish; after that, drop the future.
-    match tokio::time::timeout(drain_timeout, run_fut).await {
+    match crate::primitives::time::timeout(drain_timeout, run_fut).await {
         Ok(Ok(Ok(()))) => tracing::info!(target: "dial9_worker", "drain complete"),
         Ok(Ok(Err(error))) => {
             tracing::error!(target: "dial9_worker", %error, "worker initialization failed");

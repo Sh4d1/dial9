@@ -89,8 +89,10 @@ mod pipeline_helpers {
 
     /// Opaque handle to `writer`'s in-memory sealed-segment store. Capture
     /// this before `writer` moves into a `Recorder`/`RecorderBuilder`, so a
-    /// sibling-crate test can later inspect the real trace via
-    /// [`SealedSegments::take`] instead of a source's internal state.
+    /// sibling-crate test can later pull the raw, pre-pipeline sealed
+    /// bytes via [`SealedSegments::take`]. Route them through a real
+    /// `WorkerLoop` (e.g. `run_pipeline_continuous`) for pipeline-processed
+    /// output instead.
     pub fn writer_sealed_segments<M: BufferMode>(writer: &SegmentWriter<M>) -> SealedSegments {
         SealedSegments(writer.fs_handle().expect("writer exposes its fs"))
     }

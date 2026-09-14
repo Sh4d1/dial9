@@ -19,9 +19,10 @@
 //! `shuttle_background_task_contains_init_panic` drives
 //! `run_background_task_inner` directly, covering the panic-containment
 //! `catch_unwind`/shutdown race the `WorkerLoop`-level scenarios above
-//! never reach. That function's drain-timeout race calls real
-//! `tokio::time::timeout` (needs a live reactor), so it stays covered only
-//! by `worker/tests.rs`'s real-runtime tests.
+//! never reach. `primitives::time::timeout` makes its drain-timeout race
+//! shuttle-safe too, so the whole function, including
+//! `run_background_task`'s real-runtime wrapper, is drivable under
+//! shuttle; see `shuttle_concurrent_attach` in `dial9-tokio-telemetry`.
 
 use super::*;
 use crate::pipeline::ProcessError;

@@ -1103,7 +1103,11 @@ mod shuttle_tests {
     }
 
     shuttle_test! {
-        num_iters = 10_000, depth = 3;
+        // Attaching a pipeline stage makes `build()` spawn the
+        // worker thread, whose call depth overflows shuttle's bare-core
+        // 60KB default stack (SIGBUS). `num_iters`/`depth` match
+        // `shuttle_test!`'s `default` budget.
+        num_iters = 10_000, depth = 3, stack_size = dial9_core::primitives::SHUTTLE_TOKIO_STACK_SIZE;
         // Races concurrent attaches on one cloned `Dial9Handle`, matching
         // `attach_tokio_runtime`'s documented usage. Guards `with_source_or_insert`
         // and the registry push staying atomic (both already are today; this is
@@ -1126,8 +1130,13 @@ mod shuttle_tests {
 
             const ATTACHERS: usize = 3;
             let writer = dial9_core::buffer::MemoryBuffer::new(1 << 16).unwrap();
-            let sealed = dial9_core::test_util::writer_sealed_segments(&writer);
-            let recorder = dial9_core::recorder::recorder(writer).build();
+            let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let capture = CapturingProcessor {
+                segments: captured.clone(),
+            };
+            let recorder = dial9_core::recorder::recorder(writer)
+                .pipe(capture)
+                .build();
             recorder.handle().enable();
             let handle = recorder.handle().clone();
 
@@ -1179,24 +1188,11 @@ mod shuttle_tests {
                 tid: 0,
             });
 
-            drop(recorder); // Finalizes: seals the pending segment.
-
-            // A pipeline stage attached directly to this recorder would make
-            // `build()` spawn a worker thread that blocks on a real Tokio
-            // runtime, deadlocking shuttle's one real OS thread. Instead,
-            // drive the sealed bytes through a `WorkerLoop` via
-            // shuttle's own cooperative `block_on`, so the assertion below
-            // runs against real pipeline-processed output.
-            let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let capture = CapturingProcessor {
-                segments: captured.clone(),
-            };
-            shuttle::future::block_on(dial9_core::test_util::run_pipeline_continuous(
-                sealed.take(),
-                vec![Box::new(capture)],
-                Duration::from_millis(5),
-            ))
-            .expect("pipeline run");
+            // Finalizes (seals the pending segment) and drains the real
+            // worker thread's pipeline, so the assertion below runs
+            // against the same `CapturingProcessor` this recorder's own
+            // worker fed.
+            recorder.graceful_shutdown(Duration::from_secs(1));
 
             let mut seen = std::collections::HashMap::new();
             for bytes in captured.lock().unwrap().iter() {

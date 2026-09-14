@@ -44,7 +44,8 @@ pub use crate::define_thread_local as thread_local;
 
 #[cfg(all(not(shuttle), feature = "pipeline"))]
 pub mod time {
-    pub use tokio::time::{Instant, sleep, sleep_until};
+    pub use tokio::time::error::Elapsed;
+    pub use tokio::time::{Instant, sleep, sleep_until, timeout};
 
     pub fn now() -> Instant {
         Instant::now()
@@ -219,6 +220,42 @@ pub mod time {
             }
         }
     }
+
+    /// No virtual clock to compare `_duration` against: each `Pending`
+    /// poll of `future` has a small chance of simulating the deadline
+    /// instead of waiting, so short futures rarely get cut off while
+    /// long ones accumulate rising odds across a `pct`/`determinism` batch.
+    pub fn timeout<F: Future + Unpin>(_duration: std::time::Duration, future: F) -> Timeout<F> {
+        Timeout { future }
+    }
+
+    #[derive(Debug)]
+    pub struct Elapsed(());
+
+    pub struct Timeout<F> {
+        future: F,
+    }
+
+    // Per-pending-poll odds of simulating the deadline. Low enough that a
+    // handful of polls (a typical drain) is very unlikely to get cut off.
+    const FIRE_PROBABILITY_PER_PENDING_POLL: f64 = 0.02;
+
+    impl<F: Future + Unpin> Future for Timeout<F> {
+        type Output = Result<F::Output, Elapsed>;
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            use shuttle::rand::Rng;
+            match Pin::new(&mut self.future).poll(cx) {
+                Poll::Ready(v) => Poll::Ready(Ok(v)),
+                Poll::Pending => {
+                    if shuttle::rand::thread_rng().gen_bool(FIRE_PROBABILITY_PER_PENDING_POLL) {
+                        Poll::Ready(Err(Elapsed(())))
+                    } else {
+                        Poll::Pending
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// `tokio::select!` normally; `shuttle_tokio_impl_inner::select!` under
@@ -246,6 +283,25 @@ macro_rules! shuttle_select {
 #[cfg(feature = "pipeline")]
 pub use crate::shuttle_select;
 
+/// Real `tokio::runtime::Builder` normally; under `--cfg shuttle`,
+/// `shuttle-tokio-impl-inner`'s stand-in, whose `block_on` is
+/// `shuttle::future::block_on`: a genuine `Runtime` would capture
+/// shuttle's one OS thread forever.
+#[cfg(all(not(shuttle), feature = "pipeline"))]
+pub mod runtime {
+    pub use tokio::runtime::Builder;
+}
+#[cfg(all(shuttle, feature = "pipeline"))]
+pub mod runtime {
+    pub use shuttle_tokio_impl_inner::runtime::Builder;
+}
+
+/// Coroutine stack size for a shuttle scenario whose call depth SIGBUSes
+/// on the bare-core 60KB default. Matches `shuttle-tokio`'s own default.
+/// Use via `shuttle_test!`'s `stack_size = $bytes` modifier.
+#[cfg(shuttle)]
+pub const SHUTTLE_TOKIO_STACK_SIZE: usize = 0x000F_0000;
+
 /// Pairs a shuttle scenario with `check_pct` and `check_uncontrolled_nondeterminism`
 /// Nests the scenario in its own module so `pct`/`determinism` can be fixed leaf names.
 ///
@@ -270,6 +326,9 @@ pub use crate::shuttle_select;
 /// - `verify_faults_triggered` -- also asserts
 ///   `primitives::fs::take_faults_triggered() > 0`, so fault injection can't
 ///   silently stop exercising its error path.
+/// - `stack_size = $bytes`: build `shuttle::Runner` directly with a
+///   bumped coroutine stack, for a scenario whose call depth SIGBUSes on
+///   the hardcoded 60KB default. Pass [`SHUTTLE_TOKIO_STACK_SIZE`].
 ///
 /// Use `num_iters = $num_iters, determinism_only;` instead of `num_iters =
 /// .., depth = ..` for a scenario with no real concurrency to explore
@@ -465,6 +524,38 @@ macro_rules! shuttle_test {
                 $crate::primitives::fs::take_faults_triggered(); // drain any count left over from an earlier test
                 shuttle::check_uncontrolled_nondeterminism($name, $num_iters);
                 assert_faults_were_triggered();
+            }
+        }
+    };
+    // Same as the plain form, but builds `shuttle::Runner` directly with a
+    // bumped `stack_size`, for a scenario whose call depth SIGBUSes on
+    // the hardcoded 60KB default.
+    (num_iters = $num_iters:expr, depth = $depth:expr, stack_size = $stack_size:expr; $(#[$attr:meta])* fn $name:ident() $body:block) => {
+        mod $name {
+            use super::*;
+
+            $(#[$attr])*
+            fn $name() $body
+
+            fn config() -> shuttle::Config {
+                let mut config = shuttle::Config::new();
+                config.stack_size = $stack_size;
+                config
+            }
+
+            #[test]
+            fn pct() {
+                use shuttle::scheduler::PctScheduler;
+                let scheduler = PctScheduler::new($depth, $num_iters);
+                shuttle::Runner::new(scheduler, config()).run($name);
+            }
+
+            #[test]
+            fn determinism() {
+                use shuttle::scheduler::{RandomScheduler, UncontrolledNondeterminismCheckScheduler};
+                let scheduler =
+                    UncontrolledNondeterminismCheckScheduler::new(RandomScheduler::new($num_iters));
+                shuttle::Runner::new(scheduler, config()).run($name);
             }
         }
     };
