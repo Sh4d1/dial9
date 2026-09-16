@@ -412,6 +412,10 @@ impl<M: BufferMode> RecorderBuilder<M> {
     }
 }
 
+/// Empty, its methods are inherent on [`RecorderBuilder`] now.
+#[deprecated(since = "0.5.1", note = "remove this import; the methods are inherent")]
+pub trait RecorderSourceExt {}
+
 #[cfg(feature = "pipeline")]
 impl<M: BufferMode> RecorderBuilder<M> {
     /// Append a segment processor (compress, symbolize, upload, write-back),

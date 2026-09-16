@@ -4,6 +4,8 @@
 // Core recording API
 pub use dial9_core::buffer::{Disk, DiskBuffer, Memory, MemoryBuffer};
 pub use dial9_core::handle::{Dial9Handle, InstallGlobalHandleError};
+#[allow(deprecated)]
+pub use dial9_core::recorder::RecorderSourceExt;
 pub use dial9_core::recorder::{
     RecorderBuilder, recorder, recorder_disabled, recorder_or_disabled,
 };
