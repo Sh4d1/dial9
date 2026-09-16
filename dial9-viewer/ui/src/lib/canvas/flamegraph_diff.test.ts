@@ -232,11 +232,11 @@ describe("encodeScope / decodeScope", () => {
 });
 
 describe("diffSearch / parseDiff (dispatch decision)", () => {
-  it("round-trips two independent scopes and never leaks raw keys", () => {
+  it("round-trips two independent scopes and keeps side-only params isolated", () => {
     const a = fullScopeQuery(new URLSearchParams("api=1&bucket=ba&prefix=pa&service=svc&host=h1"));
     const b = fullScopeQuery(new URLSearchParams("api=1&bucket=bb&prefix=pb&service=svc&host=h2"));
     const search = diffSearch(a, b);
-    expect(search.startsWith("diff=1")).toBe(true);
+    expect(search.startsWith("diff=2")).toBe(true);
     expect(search.includes("bucket=")).toBe(false);
     const parsed = parseDiff(search)!;
     expect(parsed).not.toBeNull();
@@ -244,6 +244,90 @@ describe("diffSearch / parseDiff (dispatch decision)", () => {
     expect(parsed.b.get("bucket")).toBe("bb");
     expect(parsed.a.get("host")).toBe("h1");
     expect(parsed.b.get("host")).toBe("h2");
+  });
+
+  it("writes a shared host breakout once when full per-side scopes would exceed CloudFront's cap", () => {
+    const base = new URLSearchParams(
+      "api=1&bucket=example-dial9-traces" +
+        "&aws_region=us-west-2&credential_mode=role" +
+        "&aws_role_arn=arn%3Aaws%3Aiam%3A%3A123456789012%3Arole%2FExampleTraceReader" +
+        "&prefix=traces&service=example-service&source=cpu" +
+        "&start_ns=1700000000000000000&end_ns=1700003600000000000",
+    );
+    for (let i = 0; i < 95; i++) {
+      base.append(
+        "host",
+        `worker-node-${i.toString(16).padStart(16, "0")}.example.com`,
+      );
+    }
+    const a = fullScopeQuery(base);
+    a.set("max_poll_ns", "9999999");
+    const b = fullScopeQuery(base);
+    b.set("min_poll_ns", "10000000");
+
+    // Either scope fits the single-view query budget, but embedding both
+    // base64url scopes in one navigation would be more than twice the cap.
+    expect(a.toString().length).toBeLessThan(7000);
+    expect(b.toString().length).toBeLessThan(7000);
+
+    const search = diffSearch(a, b);
+    expect("/flamegraph.html?".length + search.length).toBeLessThanOrEqual(8192);
+    const encoded = new URLSearchParams(search);
+    expect(encoded.get("diff")).toBe("2");
+    expect(encoded.getAll("g.host")).toEqual(base.getAll("host"));
+    const parsed = parseDiff(search)!;
+    expect(parsed.a.getAll("host")).toEqual(base.getAll("host"));
+    expect(parsed.b.getAll("host")).toEqual(base.getAll("host"));
+    expect(parsed.a.get("max_poll_ns")).toBe("9999999");
+    expect(parsed.b.get("min_poll_ns")).toBe("10000000");
+  });
+
+  it("round-trips identical scopes with empty side deltas", () => {
+    const scope = fullScopeQuery(
+      new URLSearchParams("api=1&bucket=b&service=svc&host=h1"),
+    );
+    const search = diffSearch(scope, scope);
+    const encoded = new URLSearchParams(search);
+    expect(encoded.get("a")).toBe("");
+    expect(encoded.get("b")).toBe("");
+    const parsed = parseDiff(search)!;
+    expect(parsed.a.toString()).toBe(scope.toString());
+    expect(parsed.b.toString()).toBe(scope.toString());
+  });
+
+  it("continues to parse legacy version-1 full-scope links", () => {
+    const a = new URLSearchParams("bucket=ba&host=a1&host=a2");
+    const b = new URLSearchParams("bucket=bb&host=b1");
+    const parsed = parseDiff(
+      "diff=1&a=" + encodeScope(a) + "&b=" + encodeScope(b),
+    )!;
+    expect(parsed.a.get("bucket")).toBe("ba");
+    expect(parsed.a.getAll("host")).toEqual(["a1", "a2"]);
+    expect(parsed.b.get("bucket")).toBe("bb");
+    expect(parsed.b.getAll("host")).toEqual(["b1"]);
+  });
+
+  it("does not erase distinct host cohorts from an oversized comparison", () => {
+    const hosts = (prefix: string): URLSearchParams => {
+      const scope = new URLSearchParams(
+        "api=1&bucket=example&service=svc" +
+          "&start_ns=1700000000000000000&end_ns=1700003600000000000",
+      );
+      for (let i = 0; i < 95; i++) {
+        scope.append(
+          "host",
+          `${prefix}-worker-${i.toString(16).padStart(16, "0")}.example.com`,
+        );
+      }
+      return fullScopeQuery(scope);
+    };
+    const a = hosts("alpha");
+    const b = hosts("bravo");
+    const search = diffSearch(a, b);
+    expect("/flamegraph.html?".length + search.length).toBeGreaterThan(8192);
+    const parsed = parseDiff(search)!;
+    expect(parsed.a.getAll("host")).toEqual(a.getAll("host"));
+    expect(parsed.b.getAll("host")).toEqual(b.getAll("host"));
   });
 
   it("carries independent per-side poll-duration bands (fast vs slow)", () => {
@@ -274,6 +358,8 @@ describe("diffSearch / parseDiff (dispatch decision)", () => {
     expect(parseDiff("api=1&bucket=b")).toBeNull();
     expect(parseDiff("diff=1&a=abc")).toBeNull(); // missing b
     expect(parseDiff("diff=1")).toBeNull();
+    expect(parseDiff("diff=2&a=abc")).toBeNull(); // missing b
+    expect(parseDiff("diff=2")).toBeNull();
     expect(parseDiff("?trace=t.bin")).toBeNull();
     expect(
       parseDiff(new URLSearchParams("diff=1&a=" + encodeScope("bucket=x") + "&b=" + encodeScope("bucket=y"))),

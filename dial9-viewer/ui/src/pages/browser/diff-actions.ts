@@ -1,7 +1,7 @@
 // Differential comparison (A/B) verbs.
 //
 // Two captured aggregate scopes launched into either viz via the shared
-// FlamegraphDiff scope-link codec (?diff=1&a=<b64>&b=<b64>), which both
+// FlamegraphDiff's versioned scope-link codec, which both
 // flamegraph.html and tokio_stats.html consume. Held in the store only.
 
 // Leaf seam modules, NOT the lib barrels: the barrel indexes evaluate

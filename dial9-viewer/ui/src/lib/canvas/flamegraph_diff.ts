@@ -1,7 +1,7 @@
 // Typed seam over the frozen two-sided differential-flamegraph core
-// (flamegraph_diff.js): the DOM-free logic behind the `?diff=1` branch - tree
-// merge, relative-hotness color, per-side layout, the base64url scope-link
-// codec (encodeScope/decodeScope/diffSearch/parseDiff), and the poll-band
+// (flamegraph_diff.js): the DOM-free logic behind the `?diff=` branch - tree
+// merge, relative-hotness color, per-side layout, the versioned scope-link
+// codec (including shared-scope and legacy links), and the poll-band
 // label. Pages compose the diff through this re-export instead of importing the
 // core module directly.
 //

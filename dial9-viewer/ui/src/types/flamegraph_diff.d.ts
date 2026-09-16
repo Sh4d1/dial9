@@ -1,6 +1,6 @@
 // Type declarations for `flamegraph_diff.js` - the DOM-free core of the
-// two-sided differential flamegraph (`?diff=1`): tree merge, relative-hotness
-// color, per-side layout, the base64url scope-link codec, and the poll-band
+// two-sided differential flamegraph (`?diff=`): tree merge, relative-hotness
+// color, per-side layout, the versioned scope-link codec, and the poll-band
 // label. See src/types/decode.d.ts for the declaration-form rationale.
 //
 // Not frozen core; CommonJS-guarded and bundled through the typed lib/canvas
@@ -86,13 +86,13 @@ declare module "*/flamegraph_diff.js" {
     maxNs: string | number | null | undefined
   ): string;
 
-  /** Build the `diff=1&a=..&b=..` query string comparing two scopes. */
+  /** Build a shared-scope `diff=2` query string comparing two scopes. */
   export function diffSearch(
     scopeA: string | URLSearchParams,
     scopeB: string | URLSearchParams
   ): string;
 
-  /** Parse a diff view's location.search into { a, b }, or null when not a diff. */
+  /** Parse a version-1 or version-2 diff query into { a, b }, or return null. */
   export function parseDiff(search: string | URLSearchParams): DiffSides | null;
 
   /** Decide the page + query a viz button opens (single scope vs captured A/B). */

@@ -1,6 +1,6 @@
-// The two-sided differential flamegraph mode (`?diff=1&a=..&b=..`): side A
-// (left) and side B (right) are independent aggregate scopes (each a
-// base64url'd query). The frozen createDiffView self-mounts its DOM and owns
+// The two-sided differential flamegraph mode (`?diff=`): side A
+// (left) and side B (right) are independent reconstructed aggregate scopes.
+// The frozen createDiffView self-mounts its DOM and owns
 // the per-side SSE streams; this shell wires credentials, the B-side
 // cross-account re-prompt, and URL persistence.
 
@@ -38,7 +38,7 @@ function credsToHeaders(c: SideBCreds): Record<string, string> {
 }
 
 /**
- * Run the diff view for a `?diff=1` URL. Returns without rendering (falls back
+ * Run the diff view for a versioned `?diff=` URL. Returns without rendering
  * to the caller) when the search is not a well-formed diff link.
  */
 export function runDiffMode(params: URLSearchParams, els: PageEls): void {
@@ -156,7 +156,7 @@ export function runDiffMode(params: URLSearchParams, els: PageEls): void {
   }
 
   // Persist the diff view's zoom + highlight to the URL. The scope keys
-  // (diff/a/b) are already in the address bar; writeDiffState only touches its
+  // scope params are already in the address bar; writeDiffState only touches its
   // own diff_zoom/diff_search keys, so it composes with them.
   function onDiffViewChange(st: DiffViewState): void {
     const p = new URLSearchParams(window.location.search);

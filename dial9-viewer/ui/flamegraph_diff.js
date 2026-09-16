@@ -1,6 +1,6 @@
 "use strict";
 
-// Pure helpers for the two-sided differential flamegraph (`diff=1` mode). Kept
+// Pure helpers for the two-sided differential flamegraph (`diff` mode). Kept
 // DOM-free and CommonJS-exported so the whole diff core — tree merge, color
 // mapping, and the scope-link codec — is unit-testable under Node. In the
 // browser these attach as globals via the top-level
@@ -342,19 +342,74 @@ function pollBandLabel(minNs, maxNs) {
 // Build the query string (no leading "?") for a diff view comparing two scopes.
 // Callers prepend "flamegraph.html?". Each scope is a query string or
 // URLSearchParams (typically from fullScopeQuery).
+//
+// Version 2 writes identical values once as raw `g.<key>` params and keeps only
+// differing values in the base64url-encoded side deltas. Shared host lists
+// therefore cost roughly the same as a single-view URL instead of being encoded
+// twice. parseDiff still accepts the original version-1 full-scope format.
+const DIFF_SHARED_PREFIX = "g.";
+
 function diffSearch(scopeA, scopeB) {
-  return "diff=1&a=" + encodeScope(scopeA) + "&b=" + encodeScope(scopeB);
+  const a = new URLSearchParams(
+    typeof scopeA === "string" ? scopeA : scopeA.toString(),
+  );
+  const b = new URLSearchParams(
+    typeof scopeB === "string" ? scopeB : scopeB.toString(),
+  );
+  const deltaA = new URLSearchParams();
+  const deltaB = new URLSearchParams();
+  const out = new URLSearchParams();
+  out.set("diff", "2");
+
+  const keys = new Set([...a.keys(), ...b.keys()]);
+  for (const key of keys) {
+    const valuesA = a.getAll(key);
+    const valuesB = b.getAll(key);
+    const shared =
+      valuesA.length === valuesB.length &&
+      valuesA.every((value, i) => value === valuesB[i]);
+    if (shared) {
+      for (const value of valuesA) {
+        out.append(DIFF_SHARED_PREFIX + key, value);
+      }
+    } else {
+      for (const value of valuesA) deltaA.append(key, value);
+      for (const value of valuesB) deltaB.append(key, value);
+    }
+  }
+
+  out.set("a", encodeScope(deltaA));
+  out.set("b", encodeScope(deltaB));
+  return out.toString();
 }
 
 // Parse a diff view's location.search. Returns { a, b } (each a URLSearchParams
 // of that side's scope) when this is a diff view, or null otherwise.
 function parseDiff(search) {
   const p = typeof search === "string" ? new URLSearchParams(search) : search;
-  if (p.get("diff") !== "1") return null;
+  const version = p.get("diff");
   const a = p.get("a");
   const b = p.get("b");
-  if (!a || !b) return null;
-  return { a: decodeScope(a), b: decodeScope(b) };
+  if (version === "1") {
+    if (!a || !b) return null;
+    return { a: decodeScope(a), b: decodeScope(b) };
+  }
+  if (version !== "2" || a === null || b === null) return null;
+
+  const shared = new URLSearchParams();
+  for (const [key, value] of p) {
+    if (key.startsWith(DIFF_SHARED_PREFIX)) {
+      shared.append(key.slice(DIFF_SHARED_PREFIX.length), value);
+    }
+  }
+  const withDelta = (encoded) => {
+    const delta = decodeScope(encoded);
+    const scope = new URLSearchParams(shared);
+    for (const key of new Set(delta.keys())) scope.delete(key);
+    for (const [key, value] of delta) scope.append(key, value);
+    return scope;
+  };
+  return { a: withDelta(a), b: withDelta(b) };
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +421,7 @@ function parseDiff(search) {
 // the diff tray's launch buttons, so all of them agree on the single-vs-diff
 // decision. `kind` is "flamegraph" or "tokio". When `hasDiff` is true (a full
 // A/B diff has been captured) the target is the two-sided diff link
-// (?diff=1&a=..&b=..) built from `diffA`/`diffB`; otherwise it is the caller's
+// shared-scope diff query built from `diffA`/`diffB`; otherwise it is the caller's
 // pre-built single-scope `singleQuery`. Pure/DOM-free so the routing is
 // unit-testable without a browser.
 //

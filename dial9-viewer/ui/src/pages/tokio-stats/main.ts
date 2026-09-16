@@ -51,7 +51,7 @@ interface Period {
 // URL params are read ONCE: the scope is fixed for the page's lifetime, and
 // auto-load checks the ORIGINAL query before syncUrl rewrites it.
 const originalParams = new URLSearchParams(window.location.search);
-// Diff mode (?diff=1&a=<b64>&b=<b64>): two sides, each its own independent scope.
+// Diff mode: two reconstructed sides, each with its own independent scope.
 const diffParsed = parseDiff(originalParams);
 const fallbackSource = sourceScopeFromStored("", Dial9Creds.get());
 const scope = readScope(diffParsed?.a ?? originalParams, fallbackSource);
@@ -103,8 +103,8 @@ function renderPeriodsNow(): void {
 }
 
 function syncUrl(): void {
-  // Diff mode keeps the as-opened `?diff=1&a=&b=` link (each side's independent
-  // scope lives in the b64 payload, which buildSyncQuery cannot express); the
+  // Diff mode keeps the as-opened versioned link (each side's independent
+  // scope cannot be expressed by buildSyncQuery); the
   // p{i}_ period sync is for the normal same-scope multi-period case.
   if (diffMode) return;
   // Keep the pathname explicit: a bare "?qs" would resolve against this page's

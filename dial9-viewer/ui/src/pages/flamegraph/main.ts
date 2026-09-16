@@ -1,6 +1,6 @@
 // The flamegraph page entry: a typed shell around the flamegraph widget that
 // serves three modes from one entry -
-//   - diff mode (`?diff=1&a=..&b=..`): two-sided A/B differential (diff-mode.ts);
+//   - diff mode (`?diff=`): two-sided A/B differential (diff-mode.ts);
 //   - aggregated mode (`?api=1`): the server's demand-driven /api/flamegraph
 //     refinement loop (api-mode.ts);
 //   - exact mode (default): client fetch + decode of `?trace=` components
