@@ -16,20 +16,13 @@
 
 use core::ffi::c_void;
 
-#[allow(non_camel_case_types, dead_code)]
-#[repr(C)]
-enum UnwindReasonCode {
-    NoReason = 0,
-    Failure = 9,
-}
-
 #[allow(non_camel_case_types)]
 enum UnwindContext {}
 
-type UnwindTraceFn = extern "C" fn(ctx: *mut UnwindContext, arg: *mut c_void) -> UnwindReasonCode;
+type UnwindTraceFn = extern "C" fn(ctx: *mut UnwindContext, arg: *mut c_void) -> libc::c_int;
 
 unsafe extern "C" {
-    fn _Unwind_Backtrace(trace: UnwindTraceFn, trace_argument: *mut c_void) -> UnwindReasonCode;
+    fn _Unwind_Backtrace(trace: UnwindTraceFn, trace_argument: *mut c_void) -> libc::c_int;
     fn _Unwind_GetIP(ctx: *mut UnwindContext) -> libc::uintptr_t;
     fn _Unwind_FindEnclosingFunction(pc: *mut c_void) -> *mut c_void;
 }
@@ -40,20 +33,31 @@ struct RawCallbackData<'a> {
     frame_ips: &'a mut Vec<u64>,
 }
 
-extern "C" fn raw_trace_fn(ctx: *mut UnwindContext, arg: *mut c_void) -> UnwindReasonCode {
+extern "C" fn raw_trace_fn(ctx: *mut UnwindContext, arg: *mut c_void) -> libc::c_int {
+    // SAFETY:
+    // `_Unwind_Backtrace` invokes this callback synchronously with the same
+    // non-null argument passed by `collect_frames_raw`. That argument points to
+    // a live `RawCallbackData` for the full call and no other code accesses it
+    // while the callback runs.
     let data = unsafe { &mut *arg.cast::<RawCallbackData<'_>>() };
+    // SAFETY:
+    // The unwind runtime supplies `ctx` for this callback invocation, and its
+    // `_Unwind_GetIP` contract permits querying that context before returning.
     let ip = unsafe { _Unwind_GetIP(ctx) } as u64;
     data.frame_ips.push(ip);
-    UnwindReasonCode::NoReason
+    0
 }
 
 /// Collect all instruction pointers on the current call stack.
 /// Uses only `_Unwind_GetIP` — no `dl_iterate_phdr`, no global locks.
 pub(crate) fn collect_frames_raw(frame_ips: &mut Vec<u64>) {
     let mut data = RawCallbackData { frame_ips };
-    unsafe {
-        _Unwind_Backtrace(raw_trace_fn, (&raw mut data).cast());
-    }
+    // SAFETY:
+    // `_Unwind_Backtrace` calls `raw_trace_fn` synchronously. The callback
+    // argument points to `data`, which remains live and exclusively accessible
+    // until the call returns. The return type is the C integer ABI type rather
+    // than a Rust enum, so every foreign reason code is a valid Rust value.
+    unsafe { _Unwind_Backtrace(raw_trace_fn, (&raw mut data).cast()) };
 }
 
 // ─── Trimming (emit path, uses FindEnclosingFunction) ───────────────────────
