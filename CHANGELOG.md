@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.0](https://github.com/dial9-rs/dial9/compare/dial9-v0.5.0...dial9-v0.6.0) - 2026-09-16
+## [0.5.1](https://github.com/dial9-rs/dial9/compare/dial9-v0.5.0...dial9-v0.5.1) - 2026-09-16
 
 ### Added
 
@@ -16,9 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(viewer)* add off-CPU points of interest ([#876](https://github.com/dial9-rs/dial9/pull/876))
 - *(viewer)* add spawn-to-first-poll delay POI ([#874](https://github.com/dial9-rs/dial9/pull/874))
 
+### Deprecated
+
+- `RecorderSourceExt`: its methods are now inherent on `RecorderBuilder` now. Its import is no longer
+necessary. ([#923](https://github.com/dial9-rs/dial9/pull/923))
+
 ### Fixed
 
-- restore RecorderSourceExt as a deprecated empty trait ([#923](https://github.com/dial9-rs/dial9/pull/923))
 - *(taskdump)* remove unreleased capture changes ([#899](https://github.com/dial9-rs/dial9/pull/899))
 - [**breaking**] seal ext traits ([#883](https://github.com/dial9-rs/dial9/pull/883))
 - correct task dumps on Tokio 1.53 ([#830](https://github.com/dial9-rs/dial9/pull/830))
@@ -28,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(viewer)* don't report a rotation-stranded poll as a long poll ([#865](https://github.com/dial9-rs/dial9/pull/865))
 - *(viewer)* expand inlined frames innermost-first ([#856](https://github.com/dial9-rs/dial9/pull/856))
 - *(telemetry)* use integer libunwind reason codes ([#919](https://github.com/dial9-rs/dial9/pull/919))
+- The viewer attaches each captured task stack to the idle gap it describes.
+- *(viewer)* inlined frames no longer render upside down. Both the server-side
+  aggregation path and `symbolizeChain` flattened an address's inline group
+  outermost-first inside a leaf→root callchain, so every inline edge appeared
+  reversed — a callee looked like the caller of the function it was inlined into
+  (for example `make_poll_start` calling `record_poll_start`). The group is now
+  emitted innermost-first, keeping the flat chain uniformly leaf→root.
+  `SAMPLES_FORMAT_VERSION` is bumped to 9, so cached aggregate rollups written
+  with the old ordering are abandoned and repopulate lazily.
 
 ### Other
 
@@ -43,18 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(viewer)* flatten aggregate flamegraph trees ([#847](https://github.com/dial9-rs/dial9/pull/847))
 - *(viewer)* intern aggregate flamegraph frames ([#846](https://github.com/dial9-rs/dial9/pull/846))
 - wait for active dump ([#884](https://github.com/dial9-rs/dial9/pull/884))
-
-### Fixed
-
-- The viewer attaches each captured task stack to the idle gap it describes.
-- *(viewer)* inlined frames no longer render upside down. Both the server-side
-  aggregation path and `symbolizeChain` flattened an address's inline group
-  outermost-first inside a leaf→root callchain, so every inline edge appeared
-  reversed — a callee looked like the caller of the function it was inlined into
-  (for example `make_poll_start` calling `record_poll_start`). The group is now
-  emitted innermost-first, keeping the flat chain uniformly leaf→root.
-  `SAMPLES_FORMAT_VERSION` is bumped to 9, so cached aggregate rollups written
-  with the old ordering are abandoned and repopulate lazily.
 
 ## [0.5.0](https://github.com/dial9-rs/dial9/compare/dial9-v0.5.0-rc2.1...dial9-v0.5.0) - 2026-08-26
 
