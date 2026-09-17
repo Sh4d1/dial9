@@ -377,7 +377,8 @@ pub(crate) struct ReallocState {
     /// consolidator's `alloc_ts_ns >= ts_ns` address-reuse guard sound for
     /// shutdown-flagged frees (see `MemoryProfileSource::handle_free`): any
     /// later allocation of this address is necessarily stamped after it.
-    ts_ns: u64,
+    /// `None` when liveset tracking is disabled and no free can be emitted.
+    ts_ns: Option<u64>,
     /// `(size, alloc_ts_ns)` popped from the liveset, if the old block was
     /// sampled. `None` means it was not.
     taken: Option<(u64, u64)>,
@@ -403,17 +404,17 @@ pub(crate) struct ReallocState {
 /// SAFETY: must be allocation-free — see module docs.
 #[inline]
 pub(crate) fn on_realloc_before(inner: &MemoryProfilerInner, old_ptr: *mut u8) -> ReallocState {
-    let ts_ns = clock_monotonic_ns();
     let Some(liveset) = &inner.liveset else {
         return ReallocState {
-            ts_ns,
+            ts_ns: None,
             taken: None,
             shutdown: false,
         };
     };
+    let ts_ns = clock_monotonic_ns();
     if crate::memory_profiling::opt_out::check_shutdown() {
         return ReallocState {
-            ts_ns,
+            ts_ns: Some(ts_ns),
             taken: None,
             shutdown: true,
         };
@@ -427,7 +428,7 @@ pub(crate) fn on_realloc_before(inner: &MemoryProfilerInner, old_ptr: *mut u8) -
         taken = take_liveset_entry(liveset, addr);
     });
     ReallocState {
-        ts_ns,
+        ts_ns: Some(ts_ns),
         taken,
         shutdown: false,
     }
@@ -451,27 +452,29 @@ pub(crate) fn on_realloc_success(
     new_ptr: *mut u8,
     new_size: usize,
 ) {
-    if state.shutdown {
-        // Shutdown drain: the producer could not touch scc, so push a
-        // flagged RawFree and let the consolidator do the lookup. `size` and
-        // `alloc_ts_ns` are placeholders (0). Mirrors `on_dealloc`.
-        inner.rings.push_free(RawFree {
-            tid: current_tid(),
-            addr: old_ptr as u64,
-            ts_ns: state.ts_ns,
-            size: 0,
-            alloc_ts_ns: 0,
-            shutdown: true,
-        });
-    } else if let Some((size, alloc_ts_ns)) = state.taken {
-        inner.rings.push_free(RawFree {
-            tid: current_tid(),
-            addr: old_ptr as u64,
-            ts_ns: state.ts_ns,
-            size,
-            alloc_ts_ns,
-            shutdown: false,
-        });
+    if let Some(ts_ns) = state.ts_ns {
+        if state.shutdown {
+            // Shutdown drain: the producer could not touch scc, so push a
+            // flagged RawFree and let the consolidator do the lookup. `size`
+            // and `alloc_ts_ns` are placeholders (0). Mirrors `on_dealloc`.
+            inner.rings.push_free(RawFree {
+                tid: current_tid(),
+                addr: old_ptr as u64,
+                ts_ns,
+                size: 0,
+                alloc_ts_ns: 0,
+                shutdown: true,
+            });
+        } else if let Some((size, alloc_ts_ns)) = state.taken {
+            inner.rings.push_free(RawFree {
+                tid: current_tid(),
+                addr: old_ptr as u64,
+                ts_ns,
+                size,
+                alloc_ts_ns,
+                shutdown: false,
+            });
+        }
     }
     on_alloc(inner, new_ptr, new_size);
 }
