@@ -149,7 +149,7 @@ pub async fn build_app(config: ViewerConfig) -> anyhow::Result<axum::Router> {
 }
 
 /// [`build_app`] over a storage backend you supply, for an object store the
-/// built-in backends do not cover (Google Cloud Storage, Azure Blob, 
+/// built-in backends do not cover (Google Cloud Storage, Azure Blob,
 /// in-house solution, ...). Everything else about the assembled app
 /// is identical.
 ///
